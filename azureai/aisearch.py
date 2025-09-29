@@ -3,7 +3,7 @@
 import os
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-from azure.identity import ManagedIdentityCredential, get_bearer_token_provider
+from azure.identity import ManagedIdentityCredential, ClientSecretCredential, get_bearer_token_provider
 
 load_dotenv()
 
@@ -13,10 +13,35 @@ COGNITIVE_RESOURCE = os.getenv('AZURE_COGNITIVE_SERVICES_RESOURCE')
 SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 SEARCH_INDEX = os.getenv("AZURE_SEARCH_INDEX")
 
-token_provider = get_bearer_token_provider(
-	ManagedIdentityCredential(),
-	f'https://{COGNITIVE_RESOURCE}.openai.azure.com/.default'
-)
+
+
+# 인증 방식 자동 선택
+RESOURCE_SCOPE = 'https://cognitiveservices.azure.com/.default'
+def get_token_provider():
+	# Managed Identity 우선 시도
+	try:
+		mic = ManagedIdentityCredential()
+		# 실제 Azure 환경에서만 토큰 발급 성공
+		_ = mic.get_token(RESOURCE_SCOPE)
+		return get_bearer_token_provider(
+			mic,
+			RESOURCE_SCOPE
+		)
+	except Exception as e:
+		print("[경고] Managed Identity 인증 실패, Service Principal로 대체합니다.")
+		# 로컬 환경: Service Principal 사용
+		client_id = os.getenv('AZURE_CLIENT_ID')
+		tenant_id = os.getenv('AZURE_TENANT_ID')
+		client_secret = os.getenv('AZURE_CLIENT_SECRET')
+		if not (client_id and tenant_id and client_secret):
+			raise RuntimeError("Service Principal 환경변수가 누락되었습니다. .env 파일을 확인하세요.")
+		sp_cred = ClientSecretCredential(tenant_id, client_id, client_secret)
+		return get_bearer_token_provider(
+			sp_cred,
+			RESOURCE_SCOPE
+		)
+
+token_provider = get_token_provider()
 
 client = AzureOpenAI(
 	azure_endpoint=ENDPOINT,
