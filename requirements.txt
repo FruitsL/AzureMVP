@@ -1,3 +1,4 @@
+ -e ./azureai
 streamlit
 azure-search-documents
 azure-core

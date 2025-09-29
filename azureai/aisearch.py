@@ -3,19 +3,19 @@
 import os
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import ManagedIdentityCredential, get_bearer_token_provider
 
 load_dotenv()
 
 ENDPOINT = os.getenv("ENDPOINT_URL", "https://azureopenai-jmg.openai.azure.com/")
 DEPLOYMENT = os.getenv("DEPLOYMENT_NAME", "gpt-4.1-mini")
-COGNITIVE_RESOURCE = os.getenv('AZURE_COGNITIVE_SERVICES_RESOURCE', 'YOUR_COGNITIVE_SERVICES_RESOURCE')
+COGNITIVE_RESOURCE = os.getenv('AZURE_COGNITIVE_SERVICES_RESOURCE')
 SEARCH_ENDPOINT = os.getenv("AZURE_AI_SEARCH_ENDPOINT")
 SEARCH_INDEX = os.getenv("AZURE_AI_SEARCH_INDEX")
 
 token_provider = get_bearer_token_provider(
-	DefaultAzureCredential(),
-	f'{COGNITIVE_RESOURCE}.default'
+	ManagedIdentityCredential(),
+	f'https://{COGNITIVE_RESOURCE}.openai.azure.com/.default'
 )
 
 client = AzureOpenAI(
