@@ -12,7 +12,7 @@ DEPLOYMENT = os.getenv("DEPLOYMENT_NAME", "gpt-4.1-mini")
 COGNITIVE_RESOURCE = os.getenv('AZURE_COGNITIVE_SERVICES_RESOURCE')
 SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 SEARCH_INDEX = os.getenv("AZURE_SEARCH_INDEX")
-
+SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
 
 
 # 인증 방식 자동 선택
@@ -71,7 +71,8 @@ def ask_question(query: str):
 						"endpoint": SEARCH_ENDPOINT,
 						"index_name": SEARCH_INDEX,
 						"authentication": {
-							"type": "system_assigned_managed_identity"
+                            "type": "api_key",
+                            "key": SEARCH_KEY
 						}
 					}
 				}
