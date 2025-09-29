@@ -4,3 +4,4 @@ azure-core
 dotenv
 openai
 azure-identity
+plotly
