@@ -1,4 +1,6 @@
 
+import sys
+sys.path.append("/app")
 import streamlit as st
 import random
 import time
