@@ -1,0 +1,6 @@
+streamlit
+azure-search-documents
+azure-core
+dotenv
+openai
+azure-identity
