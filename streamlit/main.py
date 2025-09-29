@@ -9,13 +9,18 @@ import os
 from azureai.aisearch import ask_question
 from dotenv import load_dotenv
 
+load_dotenv()
+SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
+INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX")
+
+
 # 앱 제목 및 설명
 st.title("시스템 모니터링 대시보드")
 st.write("실시간 주요 시스템 지표를 모니터링합니다.")
 
 # 새로고침 버튼
 if st.button("새로고침"):
-	st.experimental_rerun()
+	st.rerun()
 
 # 임의의 지표 데이터 생성
 cpu = round(random.uniform(10, 90), 2)
@@ -34,7 +39,6 @@ with col3:
 # 최근 업데이트 시간 표시
 st.caption(f"업데이트: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-load_dotenv()
 
 
 # 질문/답변 이력 저장
@@ -47,7 +51,7 @@ user_question = st.text_input("질문을 입력하세요")
 # Azure Search 연결 및 인덱스 상태 확인
 st.subheader("Azure Search 연결 진단")
 if st.button("연결 및 인덱스 상태 확인"):
-	from azureai.aisearch import SEARCH_ENDPOINT, SEARCH_KEY, INDEX_NAME
+	from azureai.aisearch import SEARCH_ENDPOINT
 	from azure.search.documents.indexes import SearchIndexClient
 	from azure.core.credentials import AzureKeyCredential
 	try:
