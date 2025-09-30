@@ -61,29 +61,21 @@ def _get_client() -> AzureOpenAI:
 
 def get_index_for_container(container_name: str) -> str:
 	"""컨테이너 이름에 따라 AI Search 인덱스를 자동 매핑하는 함수 (자동 선택 시에만 사용)"""
-	# 컨테이너별 기본 인덱스 매핑
-	container_index_mapping = {
-		"github-api": SEARCH_INDEX or "azureblob-index",
-		"documents": "documents-index",
-		"data": "data-index", 
-		"backup": "backup-index",
-		"media": "media-index",
-		"logs": "logs-index",
-		"pdf-docs": "pdf-index",
-		"text-files": "text-index",
-	}
+	# 실제 존재하는 인덱스 중에서 컨테이너와 매칭되는 것을 찾기
+	try:
+		available_indexes = get_indexes_for_container(container_name)
+		if available_indexes:
+			# 첫 번째 매칭된 인덱스 반환
+			return available_indexes[0]['name']
+	except Exception:
+		pass
 	
-	# 정확한 매치를 먼저 시도
-	if container_name in container_index_mapping:
-		return container_index_mapping[container_name]
+	# 매칭되는 인덱스가 없으면 환경변수 인덱스 사용 (있다면)
+	if SEARCH_INDEX:
+		return SEARCH_INDEX
 	
-	# 부분 매치 시도 (컨테이너 이름에 키워드가 포함된 경우)
-	for keyword, index_name in container_index_mapping.items():
-		if keyword in container_name.lower():
-			return index_name
-	
-	# 매치되는 인덱스가 없으면 기본 인덱스 사용
-	return SEARCH_INDEX or "azureblob-index"
+	# 그것도 없으면 None 반환 (AI Search 사용하지 않음)
+	return None
 
 
 def get_indexed_containers():
@@ -112,20 +104,14 @@ def get_indexed_containers():
 		
 		indexed_containers = []
 		
-		# 실제 환경에서 사용되는 인덱스들을 확인
-		known_indexes = [
-			SEARCH_INDEX or "azureblob-index",  # 기본 인덱스
-			"documents-index",
-			"data-index", 
-			"backup-index",
-			"media-index",
-			"logs-index",
-			"pdf-docs-index",
-			"text-files-index",
-		]
-		
-		# 중복 제거
-		known_indexes = list(set(filter(None, known_indexes)))
+		# 실제 존재하는 인덱스들만 가져오기 (하드코딩된 목록 제거)
+		try:
+			from azure.search.documents.indexes import SearchIndexClient
+			index_client = SearchIndexClient(endpoint=SEARCH_ENDPOINT, credential=credential)
+			known_indexes = [index.name for index in index_client.list_indexes()]
+		except Exception:
+			# 인덱스 목록을 가져올 수 없으면 빈 목록
+			known_indexes = []
 		
 		for index_name in known_indexes:
 			try:
@@ -152,12 +138,9 @@ def get_indexed_containers():
 									container_name = storage_path.split('/containers/')[1].split('/')[0]
 									if container_name and container_name not in indexed_containers:
 										indexed_containers.append(container_name)
-							# 또는 다른 필드명으로 컨테이너 정보 확인
+							# 다른 필드에서 컨테이너 정보 확인
 							for field_name, field_value in result.items():
-								if isinstance(field_value, str) and 'github-api' in field_value.lower():
-									if 'github-api' not in indexed_containers:
-										indexed_containers.append('github-api')
-								elif isinstance(field_value, str) and '/containers/' in field_value:
+								if isinstance(field_value, str) and '/containers/' in field_value:
 									try:
 										container_name = field_value.split('/containers/')[1].split('/')[0]
 										if container_name and container_name not in indexed_containers:
@@ -165,13 +148,11 @@ def get_indexed_containers():
 									except:
 										continue
 								
-						# 기본적으로 알려진 컨테이너들도 추가 (인덱스가 존재하므로)
-						if not indexed_containers:
-							indexed_containers.extend(['github-api', 'documents', 'data'])
-							
+						# 메타데이터에서 컨테이너를 찾지 못한 경우에도 빈 상태 유지
+						
 					except Exception:
-						# 메타데이터 추출 실패 시 기본 컨테이너들 추가
-						indexed_containers.extend(['github-api', 'documents', 'data'])
+						# 메타데이터 추출 실패 시 빈 상태 유지
+						pass
 				else:
 					# 명명된 인덱스의 경우 인덱스 이름에서 컨테이너 추출
 					container_name = index_name.replace('-index', '').replace('_index', '')
@@ -187,11 +168,11 @@ def get_indexed_containers():
 		return indexed_containers
 		
 	except ImportError:
-		# Azure Search SDK가 없으면 기본 컨테이너 반환
-		return ['github-api']
+		# Azure Search SDK가 없으면 빈 목록 반환
+		return []
 	except Exception:
-		# 기타 오류 시 기본 컨테이너 반환
-		return ['github-api']
+		# 기타 오류 시 빈 목록 반환
+		return []
 
 
 def is_container_indexed(container_name: str) -> bool:
@@ -203,24 +184,89 @@ def is_container_indexed(container_name: str) -> bool:
 		if container_name in indexed_containers:
 			return True
 		
-		# github-api 특별 처리
-		if container_name.lower() == 'github-api':
-			return True
-		
 		# 부분 매치 확인
 		for indexed_container in indexed_containers:
 			if indexed_container in container_name.lower() or container_name.lower() in indexed_container:
 				return True
 		
-		# github 관련 컨테이너는 기본 인덱스 사용으로 간주
-		if 'github' in container_name.lower() or 'api' in container_name.lower():
-			return True
-		
 		return False
 		
 	except Exception:
-		# 에러 시 github-api는 true로 간주
-		return container_name.lower() == 'github-api'
+		# 에러 시 false 반환
+		return False
+
+
+def get_datasources_and_indexers():
+	"""데이터소스와 인덱서 정보를 가져오는 함수"""
+	try:
+		from azure.search.documents.indexes import SearchIndexerClient
+		from azure.identity import ClientSecretCredential, ManagedIdentityCredential
+		from azure.core.credentials import AzureKeyCredential
+		
+		if not SEARCH_ENDPOINT:
+			return [], []
+		
+		# 인증 설정
+		search_key = os.getenv("AZURE_SEARCH_KEY")
+		if search_key:
+			credential = AzureKeyCredential(search_key)
+		else:
+			client_id = os.getenv("AZURE_CLIENT_ID")
+			tenant_id = os.getenv("AZURE_TENANT_ID")
+			client_secret = os.getenv("AZURE_CLIENT_SECRET")
+			if client_id and tenant_id and client_secret:
+				credential = ClientSecretCredential(tenant_id=tenant_id, client_id=client_id, client_secret=client_secret)
+			else:
+				credential = ManagedIdentityCredential()
+		
+		indexer_client = SearchIndexerClient(
+			endpoint=SEARCH_ENDPOINT,
+			credential=credential
+		)
+		
+		# 데이터소스 목록 가져오기
+		datasources = []
+		try:
+			for ds in indexer_client.get_data_source_connections():
+				container_name = None
+				
+				# 컨테이너 정보 추출
+				if hasattr(ds, 'container') and ds.container:
+					if hasattr(ds.container, 'name'):
+						container_name = ds.container.name
+					elif isinstance(ds.container, dict) and 'name' in ds.container:
+						container_name = ds.container['name']
+					else:
+						container_name = str(ds.container)
+				
+				datasources.append({
+					'name': ds.name,
+					'type': ds.type,
+					'container': container_name,
+					'description': getattr(ds, 'description', '') or f'{ds.type} 데이터소스'
+				})
+		except Exception:
+			pass
+		
+		# 인덱서 목록 가져오기
+		indexers = []
+		try:
+			for indexer in indexer_client.get_indexers():
+				indexers.append({
+					'name': indexer.name,
+					'data_source_name': indexer.data_source_name,
+					'target_index_name': indexer.target_index_name,
+					'description': getattr(indexer, 'description', '') or f'{indexer.data_source_name} → {indexer.target_index_name}'
+				})
+		except Exception:
+			pass
+		
+		return datasources, indexers
+		
+	except ImportError:
+		return [], []
+	except Exception:
+		return [], []
 
 
 def get_available_search_indexes():
@@ -264,60 +310,146 @@ def get_available_search_indexes():
 		return indexes
 		
 	except ImportError:
-		# Azure Search SDK가 없으면 기본 인덱스들 반환
-		return [
-			{'name': SEARCH_INDEX or 'azureblob-index', 'fields_count': 0, 'description': '기본 인덱스'},
-			{'name': 'documents-index', 'fields_count': 0, 'description': '문서 인덱스'},
-			{'name': 'data-index', 'fields_count': 0, 'description': '데이터 인덱스'}
-		]
+		# Azure Search SDK가 없으면 빈 목록 반환
+		return []
 	except Exception:
-		# 기타 오류 시 기본 인덱스 반환
-		return [
-			{'name': SEARCH_INDEX or 'azureblob-index', 'fields_count': 0, 'description': '기본 인덱스'}
-		]
+		# 기타 오류 시 빈 목록 반환
+		return []
 
 
 def get_indexes_for_container(container_name: str):
-	"""특정 컨테이너에서 사용 가능한 인덱스 목록을 반환하는 함수"""
-	all_indexes = get_available_search_indexes()
-	
+	"""특정 컨테이너에 연결된 데이터소스-인덱서를 통해 인덱스 목록을 반환하는 함수"""
+	try:
+		# 데이터소스와 인덱서 정보 가져오기
+		datasources, indexers = get_datasources_and_indexers()
+		all_indexes = get_available_search_indexes()
+		
+		if not datasources or not indexers or not all_indexes:
+			# 인덱서 정보만 있으면 그것을 이용
+			if indexers and all_indexes:
+				return get_indexes_from_indexers_only(container_name, indexers, all_indexes)
+			else:
+				return get_legacy_indexes_for_container(container_name, all_indexes)
+		
+		# 선택한 컨테이너와 연결된 데이터소스 찾기
+		matching_datasources = []
+		for ds in datasources:
+			ds_container = ds.get('container')
+			if ds_container:
+				# 정확한 매치와 부분 매치 모두 확인
+				if (container_name.lower() == ds_container.lower() or 
+					container_name.lower() in ds_container.lower() or 
+					ds_container.lower() in container_name.lower()):
+					matching_datasources.append(ds)
+		
+		if not matching_datasources:
+			return get_legacy_indexes_for_container(container_name, all_indexes)
+		
+		# 매칭된 데이터소스에 연결된 인덱서와 인덱스 찾기
+		available_indexes = []
+		added_names = set()
+		
+		for ds in matching_datasources:
+			# 해당 데이터소스를 사용하는 인덱서 찾기
+			related_indexers = [idx for idx in indexers if idx['data_source_name'] == ds['name']]
+			
+			for indexer in related_indexers:
+				target_index_name = indexer['target_index_name']
+				
+				# 실제 인덱스 정보 가져오기
+				index_info = next((idx for idx in all_indexes if idx['name'] == target_index_name), None)
+				
+				if index_info and index_info['name'] not in added_names:
+					# 데이터소스-인덱서 정보 추가
+					enhanced_info = index_info.copy()
+					enhanced_info['data_source'] = ds['name']
+					enhanced_info['indexer'] = indexer['name']
+					enhanced_info['description'] = f"{ds['container']} → {ds['name']} → {indexer['name']} → {target_index_name}"
+					
+					available_indexes.append(enhanced_info)
+					added_names.add(index_info['name'])
+		
+		if not available_indexes:
+			return get_legacy_indexes_for_container(container_name, all_indexes)
+		
+		return available_indexes
+		
+	except Exception:
+		# 오류 시 기본 방식으로 폴백
+		all_indexes = get_available_search_indexes()
+		return get_legacy_indexes_for_container(container_name, all_indexes)
+
+
+def get_indexes_from_indexers_only(container_name: str, indexers: list, all_indexes: list):
+	"""인덱서 정보만으로 컨테이너에 해당하는 인덱스 찾기"""
+	try:
+		# 컨테이너 이름과 관련된 인덱서 찾기 (데이터소스 이름에서 컨테이너 추정)
+		matching_indexers = []
+		for indexer in indexers:
+			ds_name = indexer.get('data_source_name', '').lower()
+			
+			# 데이터소스 이름에 컨테이너 이름이 포함되어 있는지 확인
+			if (container_name.lower() in ds_name or 
+				ds_name in container_name.lower() or
+				container_name.replace('-', '').lower() in ds_name.replace('-', '') or
+				ds_name.replace('-', '') in container_name.replace('-', '').lower()):
+				
+				matching_indexers.append(indexer)
+		
+		if not matching_indexers:
+			return get_legacy_indexes_for_container(container_name, all_indexes)
+		
+		# 매칭된 인덱서의 타겟 인덱스들 수집
+		result_indexes = []
+		for indexer in matching_indexers:
+			target_index_name = indexer.get('target_index_name')
+			if target_index_name:
+				# 실제 인덱스 정보 찾기
+				index_info = next((idx for idx in all_indexes if idx['name'] == target_index_name), None)
+				if index_info:
+					enhanced_info = index_info.copy()
+					enhanced_info['indexer'] = indexer['name']
+					enhanced_info['data_source_guess'] = indexer['data_source_name']
+					enhanced_info['description'] = f"인덱서 {indexer['name']}를 통한 {target_index_name}"
+					result_indexes.append(enhanced_info)
+		
+		return result_indexes if result_indexes else get_legacy_indexes_for_container(container_name, all_indexes)
+		
+	except Exception:
+		return get_legacy_indexes_for_container(container_name, all_indexes)
+
+
+def get_legacy_indexes_for_container(container_name: str, all_indexes: list):
+	"""기존 방식의 컨테이너별 인덱스 매핑 (폴백용) - 실제 존재하는 인덱스만 반환"""
 	if not all_indexes:
-		# 기본 인덱스라도 반환
-		default_index = SEARCH_INDEX or "azureblob-index"
-		return [{'name': default_index, 'fields_count': 0, 'description': '기본 인덱스'}]
+		return []
 	
-	# 컨테이너별 추천 인덱스 매핑 (우선순위 순)
-	container_preferred_indexes = {
-		"github-api": [SEARCH_INDEX or "azureblob-index"],
-		"documents": ["documents-index", SEARCH_INDEX or "azureblob-index"],
-		"data": ["data-index", SEARCH_INDEX or "azureblob-index"], 
-		"backup": ["backup-index", SEARCH_INDEX or "azureblob-index"],
-		"media": ["media-index", SEARCH_INDEX or "azureblob-index"],
-		"logs": ["logs-index", SEARCH_INDEX or "azureblob-index"],
-		"pdf-docs": ["pdf-index", SEARCH_INDEX or "azureblob-index"],
-		"text-files": ["text-index", SEARCH_INDEX or "azureblob-index"],
-	}
+	# 컨테이너 이름과 유사한 인덱스 이름 패턴 매칭
+	container_keywords = [
+		container_name.lower(),
+		container_name.lower().replace('-', ''),
+		container_name.lower().replace('_', ''),
+	]
 	
-	# 선호하는 인덱스 순서 가져오기
-	preferred_names = container_preferred_indexes.get(container_name.lower(), [SEARCH_INDEX or "azureblob-index"])
+	# 환경변수에서 설정된 기본 인덱스도 추가
+	if SEARCH_INDEX:
+		container_keywords.append(SEARCH_INDEX.lower())
 	
-	# 인덱스들을 우선순위대로 정렬
 	available_indexes = []
 	added_names = set()
 	
-	# 1. 선호하는 인덱스를 먼저 추가 (존재하는 것만)
-	for preferred in preferred_names:
-		matching_indexes = [idx for idx in all_indexes if idx['name'] == preferred and idx['name'] not in added_names]
-		for idx in matching_indexes:
-			available_indexes.append(idx)
-			added_names.add(idx['name'])
-	
-	# 2. 나머지 모든 인덱스들 추가 (중복 제거)
+	# 실제 존재하는 인덱스 중에서 컨테이너 이름과 관련된 것들만 찾기
 	for idx in all_indexes:
-		if idx['name'] not in added_names:
-			available_indexes.append(idx)
-			added_names.add(idx['name'])
+		idx_name_lower = idx['name'].lower()
+		
+		# 인덱스 이름에 컨테이너 키워드가 포함되어 있는지 확인
+		for keyword in container_keywords:
+			if (keyword in idx_name_lower or idx_name_lower in keyword) and idx['name'] not in added_names:
+				available_indexes.append(idx)
+				added_names.add(idx['name'])
+				break
 	
+	# 매칭되는 인덱스가 없으면 빈 목록 반환 (더 이상 강제로 기본값 생성하지 않음)
 	return available_indexes
 
 
@@ -348,7 +480,7 @@ def ask_question_with_container(query: str, container_name: str = None, search_i
 		# 컨테이너가 지정되었지만 인덱스가 명시되지 않은 경우에만 자동 매핑 사용
 		actual_container_name = container_name.split(" (")[0].split(" 🔍")[0]
 		final_search_index = get_index_for_container(actual_container_name)
-		use_search = True
+		use_search = final_search_index is not None  # 인덱스가 실제로 존재할 때만 사용
 	else:
 		# 일반 질문의 경우 AI Search 사용하지 않음
 		final_search_index = None

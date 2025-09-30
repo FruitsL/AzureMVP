@@ -217,7 +217,7 @@ def render_ai_chat():
             from azureai.aisearch import get_indexes_for_container, get_available_search_indexes
             
             # 해당 컨테이너에서 사용 가능한 인덱스 목록 가져오기
-            with st.spinner("🔍 사용 가능한 AI Search 인덱스를 검색 중..."):
+            with st.spinner(f"🔍 '{container_name}' 컨테이너의 데이터소스-인덱서 연결을 확인 중..."):
                 available_indexes = get_indexes_for_container(container_name)
             
             if available_indexes:
@@ -227,16 +227,21 @@ def render_ai_chat():
                 
                 for idx in available_indexes:
                     option_text = f"{idx['name']}"
-                    if idx.get('description'):
+                    
+                    # 데이터소스-인덱서 정보가 있으면 표시
+                    if idx.get('data_source') and idx.get('indexer'):
+                        option_text += f" (데이터소스: {idx['data_source']}, 인덱서: {idx['indexer']})"
+                    elif idx.get('description'):
                         option_text += f" - {idx['description']}"
+                    
                     if idx.get('fields_count', 0) > 0:
-                        option_text += f" ({idx['fields_count']}개 필드)"
+                        option_text += f" [{idx['fields_count']}개 필드]"
                     
                     index_options.append(option_text)
                     index_details[option_text] = idx
                 
                 selected_index_option = st.selectbox(
-                    "사용할 AI Search 인덱스를 선택하세요",
+                    f"'{container_name}' 컨테이너 관련 AI Search 인덱스를 선택하세요",
                     options=index_options,
                     index=0,
                     help="미선택 시 AI Search 없이 일반 OpenAI로 질문합니다. 특정 인덱스 선택 시 해당 인덱스의 문서를 참조하여 답변합니다."
@@ -261,13 +266,22 @@ def render_ai_chat():
                     # 인덱스 상세 정보
                     with st.expander("📋 선택된 인덱스 상세 정보"):
                         st.write(f"**인덱스 이름**: {selected_idx_info['name']}")
+                        
+                        # 데이터소스-인덱서 연결 정보 표시
+                        if selected_idx_info.get('data_source') and selected_idx_info.get('indexer'):
+                            st.write("**데이터 흐름**:")
+                            st.write(f"  📁 컨테이너: `{container_name}`")
+                            st.write(f"  🔗 데이터소스: `{selected_idx_info['data_source']}`")
+                            st.write(f"  ⚙️ 인덱서: `{selected_idx_info['indexer']}`")
+                            st.write(f"  📊 인덱스: `{selected_idx_info['name']}`")
+                        
                         if selected_idx_info.get('description'):
                             st.write(f"**설명**: {selected_idx_info['description']}")
                         if selected_idx_info.get('fields_count', 0) > 0:
                             st.write(f"**필드 수**: {selected_idx_info['fields_count']}개")
             else:
-                st.warning("⚠️ 사용 가능한 AI Search 인덱스를 찾을 수 없습니다.")
-                st.info("💡 일반 질문 모드로 진행됩니다.")
+                st.warning(f"⚠️ '{container_name}' 컨테이너와 관련된 AI Search 인덱스를 찾을 수 없습니다.")
+                st.info("💡 일반 질문 모드로 진행되거나 다른 컨테이너를 선택해보세요.")
                 
         except Exception as e:
             st.warning(f"⚠️ 인덱스 목록을 가져올 수 없습니다: {str(e)}")
@@ -445,38 +459,59 @@ def render_ai_chat():
                     st.error(f"❌ 연결 실패: {str(e)}")
         
         with col2:
-            if st.button("📋 사용 가능한 인덱스 확인"):
+            if st.button("📋 데이터소스-인덱서 연결 확인"):
                 try:
-                    from azureai.aisearch import get_available_search_indexes, get_index_for_container
+                    from azureai.aisearch import get_available_search_indexes, get_datasources_and_indexers, get_index_for_container
                     
-                    # 사용 가능한 모든 인덱스 표시
-                    st.write("**사용 가능한 AI Search 인덱스:**")
-                    available_indexes = get_available_search_indexes()
+                    # 데이터소스와 인덱서 정보 표시
+                    datasources, indexers = get_datasources_and_indexers()
                     
-                    if available_indexes:
-                        for idx in available_indexes:
-                            index_info = f"- `{idx['name']}`"
-                            if idx.get('fields_count', 0) > 0:
-                                index_info += f" ({idx['fields_count']}개 필드)"
-                            if idx.get('description'):
-                                index_info += f" - {idx['description']}"
-                            st.write(index_info)
+                    if datasources and indexers:
+                        st.write("**🔗 데이터소스-인덱서 연결 구조:**")
+                        
+                        # 연결 구조 매핑
+                        for ds in datasources:
+                            related_indexers = [idx for idx in indexers if idx['data_source_name'] == ds['name']]
+                            if related_indexers:
+                                st.write(f"📁 **{ds['container'] or 'Unknown'}** (컨테이너)")
+                                st.write(f"  └─ 🔗 {ds['name']} (데이터소스)")
+                                for indexer in related_indexers:
+                                    st.write(f"      └─ ⚙️ {indexer['name']} (인덱서)")
+                                    st.write(f"          └─ 📊 {indexer['target_index_name']} (인덱스)")
+                                st.write("")
                     else:
-                        st.write("사용 가능한 인덱스가 없습니다.")
+                        st.write("데이터소스-인덱서 정보를 가져올 수 없습니다. 기본 매핑을 사용합니다.")
+                        
+                        # 사용 가능한 모든 인덱스 표시
+                        st.write("**사용 가능한 AI Search 인덱스:**")
+                        available_indexes = get_available_search_indexes()
+                        
+                        if available_indexes:
+                            for idx in available_indexes:
+                                index_info = f"- `{idx['name']}`"
+                                if idx.get('fields_count', 0) > 0:
+                                    index_info += f" ({idx['fields_count']}개 필드)"
+                                if idx.get('description'):
+                                    index_info += f" - {idx['description']}"
+                                st.write(index_info)
                     
                     st.divider()
                     
-                    # 현재 컨테이너들에 대한 기본 인덱스 매핑 확인
+                    # 현재 컨테이너들에 대한 연결된 인덱스 확인
                     if containers:
-                        st.write("**컨테이너별 기본 매핑된 인덱스:**")
+                        st.write("**컨테이너별 연결된 인덱스:**")
                         for container in containers[:5]:  # 처음 5개만 표시
-                            mapped_index = get_index_for_container(container['name'])
-                            st.write(f"- `{container['name']}` → `{mapped_index}`")
+                            container_indexes = get_index_for_container(container['name'])
+                            if container_indexes:
+                                index_names = [idx['name'] for idx in container_indexes]
+                                st.write(f"- `{container['name']}` → {', '.join([f'`{name}`' for name in index_names])}")
+                            else:
+                                st.write(f"- `{container['name']}` → 연결된 인덱스 없음")
                     else:
                         st.write("컨테이너 목록을 먼저 불러와주세요.")
                         
                 except Exception as e:
-                    st.warning(f"⚠️ 인덱스 정보 확인 실패: {str(e)}")
+                    st.warning(f"⚠️ 연결 정보 확인 실패: {str(e)}")
         
         # 환경 변수 확인
         st.subheader("🔧 환경 설정 확인")

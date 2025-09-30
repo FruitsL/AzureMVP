@@ -8,5 +8,6 @@ azure-mgmt-resource
 azure-mgmt-subscription
 azure-mgmt-portal
 azure-mgmt-resourcegraph
+azure-storage-blob
 plotly
 pandas
