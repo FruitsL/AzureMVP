@@ -79,15 +79,39 @@ def get_azure_dashboards():
             properties = dashboard.get('properties', {})
             metadata = properties.get('metadata', {}) if properties else {}
             model = metadata.get('model', {}) if metadata else {}
-            
-            # 대시보드 표시 이름 결정
-            display_name = dashboard.get('name', 'Unknown')
-            if model and 'title' in model:
-                display_name = model['title']
-            
-            # 공유 여부 판단 (hidden-title 태그가 없으면 공유됨)
             tags = dashboard.get('tags', {})
-            is_shared = 'hidden-title' not in tags
+            
+            # 대시보드 표시 이름 결정 (우선순위에 따라)
+            display_name = 'Unknown Dashboard'
+            
+            # 1순위: tags['hidden-title'] (Azure Portal 대시보드의 실제 이름)
+            if tags and 'hidden-title' in tags and tags['hidden-title']:
+                display_name = tags['hidden-title']
+            # 2순위: model.title (대시보드의 메타데이터 제목)
+            elif model and 'title' in model and model['title']:
+                display_name = model['title']
+            # 3순위: properties.displayName (대시보드의 표시 이름)
+            elif properties and 'displayName' in properties and properties['displayName']:
+                display_name = properties['displayName']
+            # 4순위: 리소스 이름을 읽기 쉽게 변환
+            else:
+                resource_name = dashboard.get('name', 'Unknown')
+                if resource_name and resource_name != 'Unknown':
+                    # 대시보드 이름에서 불필요한 GUID 부분 제거하고 읽기 쉽게 만들기
+                    import re
+                    cleaned_name = resource_name
+                    # GUID 패턴 제거 (8-4-4-4-12 형태)
+                    cleaned_name = re.sub(r'-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', '', cleaned_name, flags=re.IGNORECASE)
+                    # 남은 하이픈들을 공백으로 변경하고 제목 형태로 변환
+                    cleaned_name = cleaned_name.replace('-', ' ').replace('_', ' ').title()
+                    display_name = cleaned_name if cleaned_name.strip() else resource_name
+            
+            # 공유 여부 판단 
+            # Resource Graph API로 조회되는 대시보드는 모두 공유 대시보드입니다
+            # (개인 대시보드는 Azure 리소스가 아니므로 API로 조회 불가)
+            is_shared = True  # Resource Graph로 조회되는 것은 모두 공유 대시보드
+            
+
             
             dashboard_info = {
                 'id': dashboard.get('id', ''),
@@ -187,7 +211,10 @@ def render_dashboard():
     """Azure Dashboard Hub 메인 페이지"""
     st.title("🌐 Azure Dashboard Hub")
     st.markdown("""
-    Azure Portal의 대시보드를 한눈에 확인하고 관리하세요.
+    Azure Portal의 **공유 대시보드**를 한눈에 확인하고 관리하세요.
+    
+    ℹ️ **참고**: 이 도구는 Azure Resource Graph API를 사용하므로 **공유된 대시보드만** 표시됩니다. 
+    개인(private) 대시보드는 Azure Portal에서만 확인 가능합니다.
     """)
 
     # 새로고침 버튼과 상태 정보
@@ -238,156 +265,96 @@ def render_dashboard():
         st.success(f"✅ 구독 '{subscription_info.display_name}' 연결 성공")
 
     if not dashboards:
-        st.info("📋 현재 구독에서 대시보드를 찾을 수 없습니다.")
+        st.info("📋 현재 구독에서 공유 대시보드를 찾을 수 없습니다.")
+        st.markdown("""
+        **공유 대시보드가 없는 이유:**
+        - 대부분의 대시보드는 개인용(private)으로 생성됩니다
+        - 개인용 대시보드는 Azure Portal에서 '공유' 버튼을 눌러 게시해야 조회 가능합니다
+        - [Azure Portal 대시보드 공유 방법 보기](https://learn.microsoft.com/en-us/azure/azure-portal/azure-portal-dashboard-share-access)
+        """)
         return
 
     # 통계 정보 표시
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     
-    shared_count = len([d for d in dashboards if d.get('isShared', False)])
-    private_count = len(dashboards) - shared_count
     resource_groups = set(d.get('resourceGroup', 'N/A') for d in dashboards)
     
     with col1:
         st.metric("📊 총 대시보드", len(dashboards))
     with col2:
-        st.metric("🔗 공유 대시보드", shared_count)
-    with col3:
-        st.metric("🔒 개인 대시보드", private_count)
-    with col4:
         st.metric("📁 리소스 그룹", len(resource_groups))
 
     st.divider()
 
     # 필터링 옵션
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # 리소스 그룹 필터
-        rg_options = ["전체"] + sorted(list(resource_groups))
-        selected_rg = st.selectbox("📁 리소스 그룹 필터", rg_options, index=0)
-    
-    with col2:
-        # 공유 상태 필터
-        share_options = ["전체", "공유 대시보드만", "개인 대시보드만"]
-        selected_share = st.selectbox("🔗 공유 상태 필터", share_options, index=0)
+    # 리소스 그룹 필터
+    rg_options = ["전체"] + sorted(list(resource_groups))
+    selected_rg = st.selectbox("📁 리소스 그룹 필터", rg_options, index=0)
 
     # 필터 적용
     filtered_dashboards = dashboards
     
     if selected_rg != "전체":
         filtered_dashboards = [d for d in filtered_dashboards if d.get('resourceGroup') == selected_rg]
-    
-    if selected_share == "공유 대시보드만":
-        filtered_dashboards = [d for d in filtered_dashboards if d.get('isShared', False)]
-    elif selected_share == "개인 대시보드만":
-        filtered_dashboards = [d for d in filtered_dashboards if not d.get('isShared', False)]
 
     if not filtered_dashboards:
         st.warning("⚠️ 선택한 필터 조건에 맞는 대시보드가 없습니다.")
         return
 
-    # 대시보드 목록 표시
+        # 대시보드 목록 표시
     st.subheader(f"📋 대시보드 목록 ({len(filtered_dashboards)}개)")
     
-    # 대시보드 선택 드롭다운
-    dashboard_options = {
-        f"{d['displayName']} ({'공유' if d.get('isShared') else '개인'})": d 
-        for d in filtered_dashboards
-    }
-    
-    selected_dashboard_name = st.selectbox(
-        "🎯 대시보드 선택",
-        options=list(dashboard_options.keys()),
-        index=0,
-        help="목록에서 대시보드를 선택하면 상세 정보와 링크가 표시됩니다."
-    )
-
-    # 선택된 대시보드 정보 표시
-    if selected_dashboard_name:
-        selected_dashboard = dashboard_options[selected_dashboard_name]
-        
-        st.subheader("🎯 선택된 대시보드")
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown(f"""
-            **이름**: {selected_dashboard['displayName']}  
-            **리소스 이름**: {selected_dashboard['name']}  
-            **리소스 그룹**: {selected_dashboard['resourceGroup']}  
-            **위치**: {selected_dashboard['location']}  
-            **구독**: {selected_dashboard['subscriptionName']}  
-            **공유 상태**: {'🔗 공유됨' if selected_dashboard.get('isShared') else '🔒 개인용'}
-            """)
-            
-            # 태그 정보
-            if selected_dashboard.get('tags'):
-                tags_str = ", ".join([f"{k}: {v}" for k, v in selected_dashboard['tags'].items()])
-                st.markdown(f"**태그**: {tags_str}")
-        
-        with col2:
-            # 대시보드 열기 버튼
-            tenant_id = os.getenv('AZURE_TENANT_ID', '')
-            dashboard_url = generate_dashboard_url(selected_dashboard['id'], tenant_id)
-            
-            if dashboard_url:
-                st.markdown(f"""
-                <a href="{dashboard_url}" target="_blank">
-                    <button style="
-                        background-color: #0078d4;
-                        color: white;
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        font-size: 16px;
-                        width: 100%;
-                    ">
-                        🚀 대시보드 열기
-                    </button>
-                </a>
-                """, unsafe_allow_html=True)
-                
-                st.caption("새 탭에서 Azure Portal이 열립니다")
-        
-        st.divider()
-        
-        # 대시보드 미리보기 (제한적)
-        display_dashboard_preview(dashboard_url)
-
-    # 전체 대시보드 목록 테이블
-    st.subheader("📊 전체 대시보드 목록")
-    
-    # 테이블용 데이터 준비
-    table_data = []
-    for dashboard in filtered_dashboards:
+    # 테이블용 데이터 준비 - 클릭 가능한 링크가 포함된 통합 테이블
+    if filtered_dashboards:
+        table_data = []
         tenant_id = os.getenv('AZURE_TENANT_ID', '')
-        dashboard_url = generate_dashboard_url(dashboard['id'], tenant_id)
         
-        table_data.append({
-            '대시보드 이름': dashboard['displayName'],
-            '리소스 이름': dashboard['name'],
-            '공유 상태': '🔗 공유됨' if dashboard.get('isShared') else '🔒 개인용',
-            '리소스 그룹': dashboard['resourceGroup'],
-            '위치': dashboard['location'],
-            '구독': dashboard['subscriptionName'],
-            'URL': f"[열기]({dashboard_url})" if dashboard_url else "N/A"
-        })
-    
-    if table_data:
+        for dashboard in filtered_dashboards:
+            dashboard_url = generate_dashboard_url(dashboard['id'], tenant_id)
+            
+            # 대시보드 이름을 클릭 가능한 링크로 생성
+            if dashboard_url:
+                dashboard_name_link = f"🚀 {dashboard['displayName']}"
+            else:
+                dashboard_name_link = f"❌ {dashboard['displayName']}"
+            
+            table_data.append({
+                'URL': dashboard_url if dashboard_url else "N/A",
+                '대시보드 이름': dashboard_name_link,
+                '리소스 그룹': dashboard['resourceGroup']
+            })
+        
+        # 데이터프레임 생성 및 표시 - URL 컬럼을 링크 컬럼으로 설정
         df = pd.DataFrame(table_data)
-        st.dataframe(df, width='stretch')
         
-        # CSV 다운로드
-        if st.button("📥 CSV로 내보내기"):
-            csv = df.to_csv(index=False, encoding='utf-8-sig')
-            st.download_button(
-                label="다운로드",
-                data=csv,
-                file_name=f"azure_dashboards_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
+        # 클릭 가능한 링크가 포함된 테이블 표시
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "URL": st.column_config.LinkColumn(
+                    "Azure Portal 링크",
+                    width="medium",
+                    help="클릭하면 Azure Portal에서 대시보드가 열립니다"
+                ),
+                "대시보드 이름": st.column_config.TextColumn(
+                    "대시보드 이름",
+                    width="large",
+                    help="🚀 표시된 대시보드는 클릭 가능합니다"
+                ),
+                "리소스 그룹": st.column_config.TextColumn(
+                    "리소스 그룹", 
+                    width="medium"
+                )
+            }
+        )
+        
+        st.caption("💡 'Azure Portal 링크' 컬럼을 클릭하면 새 탭에서 해당 대시보드가 열립니다.")
+        
+        # 대시보드 링크는 테이블에서 직접 클릭 가능
+        
+
 
     # 상태 표시
     st.divider()
