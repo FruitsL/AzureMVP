@@ -1,7 +1,12 @@
 streamlit
 azure-search-documents
 azure-core
-dotenv
+python-dotenv
 openai
 azure-identity
+azure-mgmt-resource
+azure-mgmt-subscription
+azure-mgmt-portal
+azure-mgmt-resourcegraph
 plotly
+pandas
