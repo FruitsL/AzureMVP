@@ -7,7 +7,7 @@
 
 **Azure 리소스 관리와 AI 기반 분석을 위한 통합 대시보드**
 
-🚀 **[라이브 데모 보기](https://containerapp-jmg--0000016.grayfield-906a95fe.westus2.azurecontainerapps.io/)**
+🚀 **[라이브 데모 보기](https://containerapp-jmg.grayfield-906a95fe.westus2.azurecontainerapps.io)**
 
 ---
 
@@ -170,7 +170,7 @@ streamlit run app.py
 ## 📞 **문의 및 지원**
 
 - **GitHub Issues**: [Issues 페이지](https://github.com/FruitsL/AzureMVP/issues)
-- **라이브 데모**: [Azure MVP Hub](https://containerapp-jmg--0000016.grayfield-906a95fe.westus2.azurecontainerapps.io/)
+- **라이브 데모**: [Azure MVP Hub](https://containerapp-jmg.grayfield-906a95fe.westus2.azurecontainerapps.io)
 - **문서**: [Wiki](https://github.com/FruitsL/AzureMVP/wiki)
 
 ---
